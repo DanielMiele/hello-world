@@ -1,0 +1,82 @@
+
+```{r}
+library(RPostgreSQL)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+
+dw <- dbConnect(
+  RPostgreSQL::PostgreSQL(),
+  host="data-warehouse.cecq6teynnkq.eu-west-1.rds.amazonaws.com",
+  user="periscope",
+  password=Sys.getenv("PERISCOPE_PASSWORD"),
+  dbname="warehouse")
+
+strat_and_run_info <- dbGetQuery(dw, "
+SELECT runs.strategic_area,
+       runs.slug,
+       sum(purchases.price) / 100 as gross_revenue
+FROM runs
+LEFT JOIN purchases ON purchases.run_dimension_id = runs.id
+WHERE runs.ends_on BETWEEN '2016-11-01' AND '2017-01-31'
+          AND runs.private = 'F'
+GROUP BY 1,2
+"
+)
+
+strat_and_arpal_info <- dbGetQuery(dw, "
+with al as (
+SELECT runs.strategic_area,
+       runs.slug,
+       sum(enrolments.active_learner::int) as Active_Learner_Volume
+FROM enrolments
+JOIN runs ON runs.id = enrolments.run_dimension_id
+WHERE runs.ends_on BETWEEN '2016-11-01' AND '2017-01-31'
+          AND runs.private = 'F'
+GROUP BY 1,2
+  ), rev as (
+SELECT runs.strategic_area,
+       runs.slug,
+       sum(purchases.price) / 100 as gross_revenue
+FROM runs
+LEFT JOIN purchases ON purchases.run_dimension_id = runs.id
+WHERE runs.ends_on BETWEEN '2016-11-01' AND '2017-01-31'
+          AND runs.private = 'F'
+GROUP BY 1,2
+    )
+
+SELECT al.strategic_area,
+       al.slug,
+       al.Active_Learner_Volume,
+       rev.gross_revenue,
+       (rev.gross_revenue / al.Active_Learner_Volume::float) as arpal
+FROM al
+JOIN rev ON rev.slug = al.slug
+"
+)
+```
+
+#Gross Revenue per Strategic Area
+```{r}
+strat_and_run_info %>%
+  group_by(strategic_area) %>%
+  ggplot(aes(x=strategic_area,y=gross_revenue)) +
+  geom_boxplot() +
+  ggtitle("Gross Revenue via Strategic Area") +
+  labs(x="Strategic Area",y="Gross Revenue (£)") 
+```
+
+```{r eval=TRUE, message=FALSE, warning=FALSE, echo=FALSE}
+#strat_and_run_info %>%
+ # arrange(desc(gross_revenue))
+```
+
+```{r}
+strat_and_arpal_info %>%
+  group_by(strategic_area) %>%
+  ggplot(aes(x=strategic_area,y=arpal)) +
+  geom_boxplot() +
+  ggtitle("ARPAL via Strategic Area") +
+  labs(x="Strategic Area",y="ARPAL (£)") 
+
+```
